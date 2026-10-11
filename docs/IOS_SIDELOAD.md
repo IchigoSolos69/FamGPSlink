@@ -2,7 +2,7 @@
 
 Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple Account. AltStore signs the app for your phone. Free installs expire after seven days and must be refreshed; they are limited to three active sideloaded apps per device. This is a pilot route, with no paid Apple membership required. See [AltStore's free distribution documentation](https://faq.altstore.io/developers/distribute-with-altstore-classic) and [expiration limits](https://faq.altstore.io/altstore-classic/your-altstore).
 
-**Current status:** the workflow is prepared locally. No iPhone IPA has been built or installed yet. Windows cannot compile the native iPhone app; GitHub's Mac runner must build it first. First-build failures and physical background tracking still need validation. Check your GitHub Actions allowance and spending limit before running a Mac job; free Apple signing does not make cloud compute unlimited.
+**Current status:** version **1.1.1, iPhone build 1006** built successfully in [run 38158016893](https://github.com/IchigoSolos69/FamGPSlink/actions/runs/38158016893). Download its [famgpslink-iphone-sideload artifact](https://github.com/IchigoSolos69/FamGPSlink/actions/runs/38158016893/artifacts/11709302766), extract the ZIP and install **famgpslink-unsigned.ipa** through AltStore. Its downloaded `BUILD_INFO.json` confirms version 1.1.1, build 1006 and source commit `2ea49d1`; the IPA checksum matches the packaged checksum. This fixes the sharing transaction failure after approval. Physical installation and background tracking still need validation. Windows cannot compile the native iPhone app; GitHub's Mac runner builds it. Check your GitHub Actions allowance and spending limit before running another Mac job; free Apple signing does not make cloud compute unlimited.
 
 ## 1. Generate the FamGPSlink IPA once
 
@@ -16,8 +16,8 @@ Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple 
    ```
 
    This is the native client configuration, not an owner password or service-account credential. No Apple signing secrets are needed for this workflow.
-4. Open GitHub **Actions → iPhone sideload build → Run workflow**, choose the branch containing the source, and run it. Use this workflow rather than the paid-signing **Family pilot builds** workflow.
-5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
+4. Open GitHub **Actions → iPhone sideload build → Run workflow**. Until pull request #1 is merged, choose **codex/fix-iphone-approval** in the branch selector; `main` still contains 1.1.0 and will reproduce the sharing failure. After that merge, `main` can be used. Use the **iPhone sideload build** workflow for AltStore.
+5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. Check **BUILD_INFO.json** for version **1.1.1** or later and the intended source commit. Run 38153997532 predates this manifest and the sharing fix. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
 6. Transfer the IPA to the iPhone's Files app, for example through your own iCloud Drive. Keep it within your family.
 
 ## 2. Install AltStore Classic on each iPhone
@@ -47,3 +47,15 @@ At least once every seven days, run AltServer on Windows, connect the iPhone by 
 Expired apps cannot be opened. If AltStore itself expires, reinstall it through AltServer without deleting it first, then refresh FamGPSlink. Avoid deleting FamGPSlink to resolve signing problems: a fresh installation may require owner-approved profile recovery. Changes to the Apple signing account can also affect secure stored identity.
 
 If you have a Mac, Apple's alternative is Xcode with a free **Personal Team**; it also requires periodic rebuilding/reinstallation under the same seven-day limit. [Apple's Personal Team documentation](https://developer.apple.com/help/account/basics/about-your-developer-account).
+
+## Access error immediately after approval
+
+Version 1.0.1 requests the complete member roster after approval. The privacy rules introduced with 1.1.0 reject that unrestricted read for regular members, and the old app incorrectly reports it as lost device approval. Repeating approval does not fix an old binary.
+
+The reported run `38151212570` compiled commit `750919b52bcd53111c5259ed88885ff3c68f614a`, which is version 1.0.1. Run `38153997532` contains the earlier 1.1.0 approval fix but lacks the subsequent sharing fix. Use version **1.1.1** or later as described above. Extract its **famgpslink-iphone-sideload** artifact and install **famgpslink-unsigned.ipa** through AltStore using the same signing Apple Account, over the existing FamGPSlink installation. Keep the app installed while updating so its remembered approval can be restored. Open FamGPSlink and use **Retry connection** if the earlier error remains on screen. The live approved device bindings were verified; reapproval should not be necessary for this update.
+
+## Sharing fails even though all location permissions are granted
+
+The message **Sharing could not be updated. Try again.** in version 1.1.0 comes from an aborted tracking transaction. Version 1.1.1 retries the initial empty native cache instead of cancelling. Permission changes or repeated approval do not update installed app code.
+
+The newer successful run `38157053654` still compiled the old `main` commit `823525b`, so its higher iPhone build number does not mean it contains the fix. Check **BUILD_INFO.json** for app version **1.1.1** or later; the fixed source starts at commit `d863981`. The follow-up source `2ea49d1` also contains the Android stationary-update correction. The verified configured build `38158016893` uses that source. Install its IPA over the existing app using the same Apple Account, then enable sharing again. The earlier configured run `38156375135` was intentionally cancelled and produced no IPA.

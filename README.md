@@ -23,7 +23,7 @@ The local Flutter SDK is under `.tooling/flutter`; JDK is under `.tooling/java`.
 
 Debug APK: `build/app/outputs/flutter-apk/app-debug.apk`. With a connected phone, use `flutter run`, or `adb install -r` on the APK. Use the same test signing key for upgrades during the pilot; do not treat the debug-signed APK as a store release.
 
-The latest local pilot is **1.1.0 (build 3)**, saved as `build/app/outputs/flutter-apk/famgpslink-1.1.0.apk`. Install over the existing app to keep the remembered profile. This release adds private connections. **Upgrade every family phone:** the new rules require a constrained roster query; older versions may report changed access until upgraded. Startup failures still show a retry button and a safe error code rather than incorrectly claiming the build has no family configuration.
+The latest local pilot is **1.1.1 (build 4)**, saved as `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`. Install over the existing app to keep the remembered profile. This update fixes sharing-save failures after approval, repeated enable attempts and Android stationary updates blocked by the movement filter. Version 1.1.0 added private connections. **Upgrade every family phone:** the new rules require a constrained roster query; older versions may report changed access until upgraded. Startup failures still show a retry button and a safe error code rather than incorrectly claiming the build has no family configuration.
 
 ## Connect your family
 
@@ -92,7 +92,7 @@ See [the validation record](docs/VALIDATION.md) for completed checks and outstan
 
 ## Cloud builds and TestFlight
 
-For iPhone installation **without paid Apple membership**, use the [Windows/AltStore installation guide](docs/IOS_SIDELOAD.md) and the manual **iPhone sideload build** workflow. It packages a configured unsigned release IPA for AltStore to sign on each device. Free installs require refreshing every seven days. The first cloud iOS build and physical tracking pilot remain unverified; no iPhone download exists yet. The TestFlight route below is optional and requires paid membership.
+For iPhone installation **without paid Apple membership**, use the [Windows/AltStore installation guide](docs/IOS_SIDELOAD.md) and the manual **iPhone sideload build** workflow. It packages a configured unsigned release IPA for AltStore to sign on each device. Free installs require refreshing every seven days. The corrected **1.1.0 (iPhone build 1003)** is available in [run 38153997532](https://github.com/IchigoSolos69/FamGPSlink/actions/runs/38153997532), built from `main` commit `823525b`. Install it over the older 1.0.1 build to resolve its misleading post-approval access error. Future artifacts built with the workflow update on **codex/fix-iphone-approval** include `BUILD_INFO.json` to identify their version/source. Installation of the updated IPA and the physical tracking pilot remain unverified. The TestFlight route below is optional and requires paid membership.
 
 Push this source to your own GitHub repository to use `.github/workflows/checks.yml`. Checks run Flutter analysis/tests, rules tests, an unconfigured Android APK build and an unsigned native iOS compile.
 

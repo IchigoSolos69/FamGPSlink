@@ -19,6 +19,12 @@ String readableError(Object exception) {
         ? 'Check your connection and try again.'
         : 'Check your email and password, or use password recovery.';
   }
+  if (exception is FirebaseException) {
+    if (exception.code == 'permission-denied') {
+      return 'The family server rejected this change (permission-denied). Retry the connection; if it continues, ask the owner to check your device approval.';
+    }
+    return 'The family server could not save this change (${exception.code}). Check your connection and try again.';
+  }
   if (exception is StateError) return exception.message.toString();
   return 'Could not save this change. Check your connection and try again.';
 }

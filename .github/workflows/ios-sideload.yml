@@ -55,11 +55,23 @@ jobs:
           cd build/ios/sideload
           zip -r -y famgpslink-unsigned.ipa Payload
           shasum -a 256 famgpslink-unsigned.ipa > SHA256SUMS.txt
+          python3 - <<'PY'
+          import json, os, pathlib, plistlib
+          info = plistlib.loads(pathlib.Path('Payload/Runner.app/Info.plist').read_bytes())
+          manifest = {
+              'version': info['CFBundleShortVersionString'],
+              'build': info['CFBundleVersion'],
+              'sourceCommit': os.environ['GITHUB_SHA'],
+              'workflowRun': os.environ['GITHUB_SERVER_URL'] + '/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['GITHUB_RUN_ID'],
+          }
+          pathlib.Path('BUILD_INFO.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: famgpslink-iphone-sideload
           path: |
             build/ios/sideload/famgpslink-unsigned.ipa
             build/ios/sideload/SHA256SUMS.txt
+            build/ios/sideload/BUILD_INFO.json
           if-no-files-found: error
           retention-days: 14

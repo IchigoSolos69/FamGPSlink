@@ -41,7 +41,7 @@ if (config.exists()) throw new Error('Owner already configured; refusing to repl
 await root.update({
   config: { ownerUid: user.uid, ownerMemberId: 'owner' },
   [`family/bindings/${user.uid}`]: 'owner',
-  'family/members/owner': { name: ownerName.trim(), authUid: user.uid, installationId: 'owner', active: true },
+  'family/members/owner': { name: ownerName.trim(), authUid: user.uid, installationId: 'owner', active: true, visibility: 'family' },
   'family/states/owner': { control: { sharingEnabled: false, overrideActive: false, revision: 0 } },
 });
 console.log('Owner configured. Deploy locked database rules and sign in with the owner account.');

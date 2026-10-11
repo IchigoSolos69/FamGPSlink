@@ -458,13 +458,15 @@ class _FamilyHomeState extends State<FamilyHome> with WidgetsBindingObserver {
         setState(() => page = index);
         widget.controller.setMapVisible(index == 0);
       },
-      destinations: const [
+      destinations: [
         NavigationDestination(
           icon: Icon(Icons.map_outlined),
           selectedIcon: Icon(Icons.map),
-          label: 'Family map',
+          label: widget.controller.isPrivateConnection
+              ? 'Private map'
+              : 'Family map',
         ),
-        NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
+        const NavigationDestination(icon: Icon(Icons.tune), label: 'Settings'),
       ],
     ),
   );
@@ -595,7 +597,9 @@ class _FamilyMapState extends State<FamilyMap> {
                         Expanded(
                           child: Text(
                             family.control.sharing
-                                ? 'Your location is shared with family'
+                                ? family.isPrivateConnection
+                                      ? 'Your location is shared only with the owner'
+                                      : 'Your location is shared with family'
                                 : 'Your location sharing is paused',
                           ),
                         ),
@@ -644,7 +648,7 @@ class _FamilyMapState extends State<FamilyMap> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
                       child: Text(
-                        'Your family · ${family.members.length}',
+                        '${family.isPrivateConnection ? 'Your connection' : 'Your family'} · ${family.members.length}',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
@@ -786,6 +790,17 @@ class _SettingsPageState extends State<SettingsPage>
           ),
         ),
         const SizedBox(height: 16),
+        if (family.isPrivateConnection) ...[
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Private connection: only the owner can see your profile and shared location. You can see only the owner and your own pin. You choose when to share.',
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         SwitchListTile(
           title: const Text('Share my location'),
           subtitle: const Text('Pausing removes your shared pin.'),
@@ -963,8 +978,9 @@ class _AdminPageState extends State<AdminPage> {
   late final members = widget.controller.familyMembers();
   bool busy = false;
   Future<void> approve(PairingRequest request, List<Member> profiles) async {
-    final code = TextEditingController();
+    String code = '';
     String selected = 'new';
+    bool ownerOnly = false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -979,7 +995,7 @@ class _AdminPageState extends State<AdminPage> {
                 ),
                 const SizedBox(height: 16),
                 TextField(
-                  controller: code,
+                  onChanged: (value) => code = value,
                   textCapitalization: TextCapitalization.characters,
                   decoration: const InputDecoration(
                     labelText: 'Pairing code from their phone',
@@ -1009,6 +1025,24 @@ class _AdminPageState extends State<AdminPage> {
                   onChanged: (value) => setDialogState(() => selected = value!),
                   decoration: const InputDecoration(labelText: 'Profile'),
                 ),
+                if (selected == 'new')
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Private connection (only you)'),
+                    subtitle: const Text(
+                      'Only you can see this person. They can see only you. Other family members cannot see their profile or location.',
+                    ),
+                    value: ownerOnly,
+                    onChanged: (value) =>
+                        setDialogState(() => ownerOnly = value),
+                  )
+                else
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      'Recovery keeps the existing profile’s visibility.',
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1019,7 +1053,7 @@ class _AdminPageState extends State<AdminPage> {
             ),
             FilledButton(
               onPressed: () {
-                if (code.text.trim().toUpperCase() == request.code) {
+                if (code.trim().toUpperCase() == request.code) {
                   Navigator.pop(context, true);
                 } else {
                   ScaffoldMessenger.of(this.context).showSnackBar(
@@ -1037,7 +1071,6 @@ class _AdminPageState extends State<AdminPage> {
         ),
       ),
     );
-    code.dispose();
     if (confirmed != true || !mounted) return;
     setState(() => busy = true);
     await perform(
@@ -1045,6 +1078,7 @@ class _AdminPageState extends State<AdminPage> {
       () => widget.controller.approve(
         request,
         recoverMemberId: selected == 'new' ? null : selected,
+        ownerOnly: ownerOnly,
       ),
       success: 'Phone approved. Sharing starts when the member enables it.',
     );
@@ -1123,7 +1157,9 @@ class _AdminPageState extends State<AdminPage> {
                   subtitle: Text(
                     member.id == widget.controller.ownerMemberId
                         ? 'Owner · recover using email sign-in'
-                        : 'One approved phone',
+                        : member.ownerOnly
+                        ? 'Private connection · visible only to you'
+                        : 'One approved phone · family sharing',
                   ),
                   trailing: member.id == widget.controller.ownerMemberId
                       ? null

@@ -42,6 +42,7 @@ class FamilyController extends ChangeNotifier {
   bool _disposed = false;
 
   bool get isOwner => auth.currentUser?.uid == ownerUid && ownerUid != null;
+  bool get isPrivateConnection => self?.ownerOnly == true;
   DatabaseReference get _family => database.ref('family');
   DatabaseReference get _state => _family.child('states/${self!.id}');
 
@@ -252,23 +253,73 @@ class FamilyController extends ChangeNotifier {
       unawaited(_detachMap());
       return;
     }
-    if (_mapSubscriptions.isNotEmpty) return;
-    _mapSubscriptions.add(
-      _family.child('members').onValue.listen((event) {
-        members =
+    final scope = '${self!.id}:$isOwner:$isPrivateConnection';
+    if (_mapScope == scope) return;
+    unawaited(_attachMap(scope));
+  }
+
+  String? _mapScope;
+  int _mapGeneration = 0;
+  Future<void> _attachMap(String scope) async {
+    final generation = ++_mapGeneration;
+    _mapScope = scope;
+    await _cancelMapSubscriptions();
+    if (generation != _mapGeneration || _disposed || self == null) return;
+    members = [];
+    locations.clear();
+    notifyListeners();
+    if (isPrivateConnection) {
+      final profiles = <String, Member>{};
+      for (final id in {self!.id, ownerMemberId!}) {
+        _mapSubscriptions.add(
+          _family.child('members/$id').onValue.listen((event) {
+            if (generation != _mapGeneration || _disposed) return;
+            if (objectMap(event.snapshot.value)['active'] == true) {
+              profiles[id] = Member.fromMap(id, event.snapshot.value);
+            } else {
+              profiles.remove(id);
+            }
+            _setMapMembers(profiles.values.toList(), generation);
+          }, onError: (Object error) => _mapFailure(error, generation)),
+        );
+      }
+    } else {
+      final Query query = isOwner
+          ? _family.child('members')
+          : _family
+                .child('members')
+                .orderByChild('visibility')
+                .equalTo('family');
+      _mapSubscriptions.add(
+        query.onValue.listen((event) {
+          if (generation != _mapGeneration || _disposed) return;
+          _setMapMembers(
             objectMap(event.snapshot.value).entries
                 .where((entry) => objectMap(entry.value)['active'] == true)
                 .map((entry) => Member.fromMap(entry.key, entry.value))
-                .toList()
-              ..sort((a, b) => a.name.compareTo(b.name));
-        _refreshLocationSubscriptions();
-        notifyListeners();
-      }, onError: _failure),
-    );
+                .toList(),
+            generation,
+          );
+        }, onError: (Object error) => _mapFailure(error, generation)),
+      );
+    }
+  }
+
+  void _setMapMembers(List<Member> profiles, int generation) {
+    members = profiles..sort((a, b) => a.name.compareTo(b.name));
+    _refreshLocationSubscriptions(generation);
+    notifyListeners();
+  }
+
+  void _mapFailure(Object exception, int generation) {
+    if (generation != _mapGeneration || _disposed) return;
+    error = 'Map access is unavailable. Try again to refresh your connection.';
+    unawaited(_detachMap());
+    notifyListeners();
   }
 
   final _locationSubscriptions = <String, StreamSubscription<DatabaseEvent>>{};
-  void _refreshLocationSubscriptions() {
+  void _refreshLocationSubscriptions(int generation) {
     final ids = members.map((member) => member.id).toSet();
     for (final id in _locationSubscriptions.keys.toList()) {
       if (!ids.contains(id)) {
@@ -279,25 +330,51 @@ class FamilyController extends ChangeNotifier {
     for (final member in members) {
       _locationSubscriptions.putIfAbsent(
         member.id,
-        () => _stateFor(member.id).child('location').onValue.listen((event) {
-          if (event.snapshot.exists) {
-            try {
-              locations[member.id] = SharedLocation.fromMap(
-                event.snapshot.value,
-              );
-            } catch (_) {
-              locations.remove(member.id);
-            }
-          } else {
-            locations.remove(member.id);
-          }
-          notifyListeners();
-        }, onError: _failure),
+        () => _stateFor(member.id)
+            .child('location')
+            .onValue
+            .listen(
+              (event) {
+                if (generation != _mapGeneration ||
+                    _disposed ||
+                    !members.any((profile) => profile.id == member.id)) {
+                  return;
+                }
+                if (event.snapshot.exists) {
+                  try {
+                    locations[member.id] = SharedLocation.fromMap(
+                      event.snapshot.value,
+                    );
+                  } catch (_) {
+                    locations.remove(member.id);
+                  }
+                } else {
+                  locations.remove(member.id);
+                }
+                notifyListeners();
+              },
+              onError: (Object exception) {
+                if (generation != _mapGeneration || _disposed) return;
+                // A peer being removed must not stop this phone's own sharing.
+                locations.remove(member.id);
+                notifyListeners();
+              },
+            ),
       );
     }
   }
 
   Future<void> _detachMap() async {
+    _mapGeneration++;
+    _mapScope = null;
+    final hadData = members.isNotEmpty || locations.isNotEmpty;
+    members = [];
+    locations.clear();
+    if (hadData && !_disposed) notifyListeners();
+    await _cancelMapSubscriptions();
+  }
+
+  Future<void> _cancelMapSubscriptions() async {
     final subscriptions = [
       ..._mapSubscriptions,
       ..._locationSubscriptions.values,
@@ -441,6 +518,7 @@ class FamilyController extends ChangeNotifier {
   Future<void> approve(
     PairingRequest pairing, {
     String? recoverMemberId,
+    bool ownerOnly = false,
   }) async {
     await _requireConnection();
     if (!isOwner) throw StateError('Owner access required.');
@@ -474,6 +552,11 @@ class FamilyController extends ChangeNotifier {
         'authUid': pairing.uid,
         'installationId': pairing.installationId,
         'active': true,
+        'visibility': recoverMemberId != null
+            ? previous['visibility'] ?? 'family'
+            : ownerOnly
+            ? 'ownerOnly'
+            : 'family',
       },
       'family/bindings/${pairing.uid}': memberId,
       'family/states/$memberId': {

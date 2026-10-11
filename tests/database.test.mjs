@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { ref, get, set, update, runTransaction, serverTimestamp } from 'firebase/database';
+import { ref, get, set, update, runTransaction, serverTimestamp, query, orderByChild, equalTo } from 'firebase/database';
 
 let environment;
 const control = (revision = 1, overrideActive = false, sharingEnabled = true) => ({ revision, overrideActive, sharingEnabled });
 const fix = (extra = {}) => ({ latitude: 19.076, longitude: 72.8777, accuracy: 12,
   measuredAt: Date.now(), publishedAt: serverTimestamp(), ...extra });
 const db = (uid) => environment.authenticatedContext(uid).database();
-const member = (name, uid) => ({ name, authUid: uid, installationId: 'A'.repeat(32), active: true });
+const member = (name, uid, visibility = 'family') => ({ name, authUid: uid, installationId: 'A'.repeat(32), active: true, visibility });
+const familyProfiles = (uid) => query(ref(db(uid), 'family/members'), orderByChild('visibility'), equalTo('family'));
 const request = { name: 'Charlie', installationId: 'B'.repeat(32), code: 'ABCD2345', createdAt: serverTimestamp() };
 const manualState = (location, revision = 2) => ({
   control: { ...control(revision, true), manual: { latitude: location.latitude, longitude: location.longitude, setAt: location.measuredAt } },
@@ -25,11 +26,12 @@ beforeEach(async () => {
   await environment.withSecurityRulesDisabled(async (context) => set(ref(context.database()), {
     config: { ownerUid: 'owner-uid', ownerMemberId: 'owner' },
     family: {
-      bindings: { 'owner-uid': 'owner', 'alice-uid': 'alice', 'bob-uid': 'bob' },
-      members: { owner: member('Owner', 'owner-uid'), alice: member('Alice', 'alice-uid'), bob: member('Bob', 'bob-uid') },
+      bindings: { 'owner-uid': 'owner', 'alice-uid': 'alice', 'bob-uid': 'bob', 'partner-uid': 'partner' },
+      members: { owner: member('Owner', 'owner-uid'), alice: member('Alice', 'alice-uid'), bob: member('Bob', 'bob-uid'), partner: member('Partner', 'partner-uid', 'ownerOnly') },
       states: { owner: { control: control(), location: fix({ measuredAt: Date.now() - 10000 }) },
         alice: { control: control(), location: fix({ measuredAt: Date.now() - 10000 }) },
-        bob: { control: control(), location: fix({ measuredAt: Date.now() - 10000 }) } },
+        bob: { control: control(), location: fix({ measuredAt: Date.now() - 10000 }) },
+        partner: { control: control(), location: fix({ measuredAt: Date.now() - 10000 }) } },
     },
   }));
 });
@@ -145,7 +147,7 @@ test('recovery preserves the profile and revokes the old device immediately', as
   }));
   await assertFails(get(ref(db('alice-uid'), 'family/states/bob/location')));
   await assertFails(set(ref(db('alice-uid'), 'family/states/alice'), { control: control(), location: fix() }));
-  await assertSucceeds(get(ref(db('new-alice-uid'), 'family/members')));
+  await assertSucceeds(get(familyProfiles('new-alice-uid')));
   assert.equal((await get(ref(db('new-alice-uid'), 'family/members/alice'))).val().name, 'Alice');
 });
 test('owner removes access and coordinates together; owner identity cannot be removed', async () => {
@@ -155,4 +157,82 @@ test('owner removes access and coordinates together; owner identity cannot be re
   await assertFails(get(ref(db('bob-uid'), 'family/members')));
   await assertFails(set(ref(db('owner-uid'), 'family/bindings/owner-uid'), null));
   await assertFails(set(ref(db('owner-uid'), 'family/members/owner'), null));
+});
+
+test('family directory query omits private profiles and forbids unfiltered or widened reads', async () => {
+  const profiles = (await assertSucceeds(get(familyProfiles('alice-uid')))).val();
+  assert.deepEqual(Object.keys(profiles).sort(), ['alice', 'bob', 'owner']);
+  await assertFails(get(ref(db('alice-uid'), 'family/members')));
+  await assertFails(get(query(ref(db('alice-uid'), 'family/members'), orderByChild('visibility'))));
+  await assertFails(get(query(ref(db('alice-uid'), 'family/members'), orderByChild('visibility'), equalTo('ownerOnly'))));
+});
+
+test('family members cannot retrieve a private profile or location by guessing its path', async () => {
+  for (const path of ['family/members/partner', 'family/members/partner/name',
+    'family/members/partner/authUid', 'family/states/partner/location',
+    'family/states/partner/location/latitude', 'family/states/partner/control',
+    'family/states/partner', 'family/bindings/partner-uid']) {
+    await assertFails(get(ref(db('alice-uid'), path)));
+  }
+});
+
+test('private connection reads only owner and self, including direct paths and queries', async () => {
+  for (const id of ['owner', 'partner']) {
+    await assertSucceeds(get(ref(db('partner-uid'), `family/members/${id}`)));
+    await assertSucceeds(get(ref(db('partner-uid'), `family/states/${id}/location`)));
+  }
+  await assertSucceeds(get(ref(db('partner-uid'), 'family/states/partner')));
+  await assertFails(get(familyProfiles('partner-uid')));
+  for (const path of ['family/members', 'family/members/alice', 'family/members/bob/name',
+    'family/states/alice/location', 'family/states/bob/location/latitude',
+    'family/states/owner/control', 'family/states/owner', 'pairingRequests']) {
+    await assertFails(get(ref(db('partner-uid'), path)));
+  }
+});
+
+test('owner sees both family and private locations; private member can publish and pause only themselves', async () => {
+  const profiles = (await assertSucceeds(get(ref(db('owner-uid'), 'family/members')))).val();
+  assert.equal(profiles.partner.visibility, 'ownerOnly');
+  await assertSucceeds(get(ref(db('owner-uid'), 'family/states/partner/location')));
+  await assertSucceeds(set(ref(db('partner-uid'), 'family/states/partner'), { control: control(), location: fix() }));
+  await assertFails(set(ref(db('partner-uid'), 'family/states/owner'), { control: control(), location: fix() }));
+  await assertSucceeds(set(ref(db('partner-uid'), 'family/states/partner'), { control: control(2, false, false) }));
+  assert.equal((await get(ref(db('owner-uid'), 'family/states/partner/location'))).exists(), false);
+});
+
+test('audiences cannot be escalated or silently broadened after approval', async () => {
+  await assertFails(update(ref(db('partner-uid'), 'family/members/partner'), { visibility: 'family' }));
+  await assertFails(update(ref(db('alice-uid'), 'family/members/alice'), { visibility: 'ownerOnly' }));
+  await assertFails(update(ref(db('owner-uid'), 'family/members/partner'), { visibility: 'family' }));
+  await assertFails(update(ref(db('owner-uid'), 'family/members/alice'), { visibility: 'ownerOnly' }));
+  await assertFails(update(ref(db('owner-uid'), 'family/members/owner'), { visibility: 'ownerOnly' }));
+  await assertFails(update(ref(db('owner-uid'), 'family/members/partner'), { visibility: null }));
+});
+
+test('private phone recovery retains its audience and revokes the old phone', async () => {
+  await assertSucceeds(update(ref(db('owner-uid')), {
+    'family/bindings/partner-uid': null, 'family/bindings/new-partner-uid': 'partner',
+    'family/members/partner': member('Partner', 'new-partner-uid', 'ownerOnly'),
+    'family/states/partner': { control: control(2, false, false) },
+  }));
+  await assertFails(get(ref(db('partner-uid'), 'family/states/owner/location')));
+  await assertFails(set(ref(db('partner-uid'), 'family/states/partner'), { control: control(), location: fix() }));
+  await assertSucceeds(get(ref(db('new-partner-uid'), 'family/states/owner/location')));
+  await assertFails(get(familyProfiles('new-partner-uid')));
+  await assertFails(get(ref(db('new-partner-uid'), 'family/states/alice/location')));
+  await assertFails(get(ref(db('alice-uid'), 'family/members/partner')));
+});
+
+test('new private profile is atomically approved with sharing disabled and stays outside the family directory', async () => {
+  await assertSucceeds(update(ref(db('owner-uid')), {
+    'family/bindings/charlie-uid': 'charlie',
+    'family/members/charlie': member('Charlie', 'charlie-uid', 'ownerOnly'),
+    'family/states/charlie': { control: control(0, false, false) },
+  }));
+  assert.equal((await get(familyProfiles('alice-uid'))).hasChild('charlie'), false);
+  await assertSucceeds(get(ref(db('charlie-uid'), 'family/states/owner/location')));
+  await assertFails(get(ref(db('charlie-uid'), 'family/states/alice/location')));
+  await assertFails(get(ref(db('charlie-uid'), 'family/states/partner/location')));
+  await assertFails(get(ref(db('partner-uid'), 'family/members/charlie')));
+  assert.equal((await get(ref(db('owner-uid'), 'family/states/charlie/location'))).exists(), false);
 });

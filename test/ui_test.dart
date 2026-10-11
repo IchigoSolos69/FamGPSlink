@@ -8,11 +8,87 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
-class TestAuth extends Fake implements FirebaseAuth {}
+class TestAuth extends Fake implements FirebaseAuth {
+  @override
+  User? get currentUser => null;
+}
 
 class TestDatabase extends Fake implements FirebaseDatabase {}
 
+class ApprovalController extends FamilyController {
+  ApprovalController() : super(auth: TestAuth(), database: TestDatabase()) {
+    ownerMemberId = 'owner';
+  }
+  bool? approvedOwnerOnly;
+  @override
+  Stream<List<Member>> familyMembers() => Stream.value([]);
+  @override
+  Stream<List<PairingRequest>> pairingRequests() => Stream.value([
+    PairingRequest('partner-uid', {
+      'name': 'Partner',
+      'code': 'ABCD2345',
+      'installationId': 'A' * 32,
+    }),
+  ]);
+  @override
+  Future<void> approve(
+    PairingRequest pairing, {
+    String? recoverMemberId,
+    bool ownerOnly = false,
+  }) async {
+    approvedOwnerOnly = ownerOnly;
+  }
+}
+
 void main() {
+  testWidgets(
+    'owner can select private approval before confirming the pairing code',
+    (tester) async {
+      final controller = ApprovalController();
+      await tester.pumpWidget(
+        MaterialApp(home: AdminPage(controller: controller)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Approve or recover profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('Private connection (only you)'), findsOneWidget);
+      expect(controller.approvedOwnerOnly, null);
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.enterText(find.byType(TextField), 'ABCD2345');
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      expect(controller.approvedOwnerOnly, true);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'private member sees who can access their location and retains the sharing toggle',
+    (tester) async {
+      final controller =
+          FamilyController(auth: TestAuth(), database: TestDatabase())
+            ..self = const Member(
+              'partner',
+              'Partner',
+              'partner-uid',
+              ownerOnly: true,
+            );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SettingsPage(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('only the owner can see your profile'),
+        findsOneWidget,
+      );
+      expect(find.text('Share my location'), findsOneWidget);
+      expect(find.text('Family administration'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
   testWidgets(
     'first sign-in failure reports its cause and retry opens onboarding',
     (tester) async {

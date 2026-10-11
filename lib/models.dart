@@ -14,10 +14,11 @@ String randomCode([int length = 16]) {
 }
 
 class Member {
-  const Member(this.id, this.name, this.authUid);
+  const Member(this.id, this.name, this.authUid, {this.ownerOnly = false});
   final String id;
   final String name;
   final String authUid;
+  final bool ownerOnly;
 
   factory Member.fromMap(String id, Object? value) {
     final map = objectMap(value);
@@ -25,6 +26,7 @@ class Member {
       id,
       map['name'] as String? ?? 'Family member',
       map['authUid'] as String? ?? '',
+      ownerOnly: map['visibility'] == 'ownerOnly',
     );
   }
 }

@@ -23,7 +23,7 @@ The local Flutter SDK is under `.tooling/flutter`; JDK is under `.tooling/java`.
 
 Debug APK: `build/app/outputs/flutter-apk/app-debug.apk`. With a connected phone, use `flutter run`, or `adb install -r` on the APK. Use the same test signing key for upgrades during the pilot; do not treat the debug-signed APK as a store release.
 
-The latest local pilot is **1.0.1 (build 2)**, also saved as `build/app/outputs/flutter-apk/famgpslink-1.0.1.apk`. Install over the existing app to keep the remembered profile. A startup failure now shows a retry button and a safe error code instead of incorrectly claiming the build has no family configuration. If retry fails, provide that code to the family owner.
+The latest local pilot is **1.1.0 (build 3)**, saved as `build/app/outputs/flutter-apk/famgpslink-1.1.0.apk`. Install over the existing app to keep the remembered profile. This release adds private connections. **Upgrade every family phone:** the new rules require a constrained roster query; older versions may report changed access until upgraded. Startup failures still show a retry button and a safe error code rather than incorrectly claiming the build has no family configuration.
 
 ## Connect your family
 
@@ -56,6 +56,8 @@ No privileged credential is needed after setup. Realtime Database rules enforce 
 
 ## Everyday behavior and recovery
 
+- **Private connection:** when approving a new pairing request in **Settings → Family administration**, enable **Private connection (only you)** before confirming the code. The person is absent from other family members' profiles, map, member count and location access. Only the owner sees their shared pin; they see only the owner and their own pin. Their settings explain this audience, and sharing starts only when they opt in. The owner still sees normal family members. Private connections cannot see each other.
+- **Private recovery:** choose **Recover [name]** for a replacement phone; the existing visibility is retained and the previous device is revoked. Visibility is fixed when the profile is approved. To change it, remove the profile and pair again, rather than silently broadening its audience.
 - **Sharing:** allow foreground location first, then Background/Always access. Android shows the required ongoing notification. Approximate permissions work; the member list displays their estimated accuracy in metres. Sharing off removes the public pin.
 - **Battery:** moving collection targets about 60 seconds / 50 metres; Android drops to balanced-power 5-minute requests after three minutes without motion. iOS lowers accuracy and uses automatic pausing and significant-change monitoring. Stationary updates are opportunistic: neither OS promises a five-minute heartbeat. Power restrictions or force-stop may require reopening the app.
 - **Map:** family listeners attach only while the family map is visible and the app is foregrounded. Per-member private-control listeners are never used to populate the shared map. Accuracy and stale age use the measurement time, not the network upload time.
@@ -67,7 +69,13 @@ No privileged credential is needed after setup. Realtime Database rules enforce 
 
 ## Data and validation
 
-The database has `config`, `pairingRequests`, and `family/{bindings,members,states}`. A state contains private `control` and family-readable `location`. Only the active bound device can read its whole state; other members can read only its `location`. Control has `sharingEnabled`, `overrideActive`, a monotonically increasing `revision`, and the chosen manual pin while an override is active (so pausing/resuming sharing retains it). Location has `latitude`, `longitude`, optional `accuracy`, `measuredAt` and `publishedAt`. No route history or underlying real owner location is stored during an override.
+The database has `config`, `pairingRequests`, and `family/{bindings,members,states}`. Profiles include an immutable `visibility` of `family` or `ownerOnly`. Normal members read the roster using `orderByChild('visibility').equalTo('family')`; only the owner can read the complete roster. Private connections subscribe directly to their own profile and the owner's profile. Rules apply the same audience checks to individual profile and location reads, including guessed paths. A state contains private `control` and audience-readable `location`. Only the active bound device can read its whole state; permitted peers can read only its `location`. Control has `sharingEnabled`, `overrideActive`, a monotonically increasing `revision`, and the chosen manual pin while an override is active (so pausing/resuming sharing retains it). Location has `latitude`, `longitude`, optional `accuracy`, `measuredAt` and `publishedAt`. No route history or underlying real owner location is stored during an override.
+
+For an existing backend, upgrade profile metadata before deploying these rules. `tools/migrate-visibility.mjs` defaults to a dry run; it adds `visibility: family` to legacy profiles while preserving existing audiences, bindings and locations. Run with `--apply` using trusted Firebase CLI sign-in:
+
+```powershell
+node tools/migrate-visibility.mjs --cli --apply famgpslink https://famgpslink-default-rtdb.asia-southeast1.firebasedatabase.app
+```
 
 Rules are maintained in `tools/write-rules.mjs`; generated `database.rules.json` is the deployable source. After a rule edit, regenerate and run real emulator tests:
 
@@ -78,7 +86,7 @@ $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 npm test
 ```
 
-Tests cover outsider/pending access, pairing isolation, impersonation and escalation, coordinate/timestamp validation, private override reads, upload races, stale replay, recovery and member removal. Flutter tests cover timestamp/accuracy semantics and shared-pin rendering. Physical-device and 24-hour battery acceptance remain separate requirements in `docs/PILOT.md`.
+Tests cover outsider/pending access, pairing isolation, impersonation and escalation, private profile/location isolation and constrained queries, coordinate/timestamp validation, private override reads, upload races, stale replay, audience-preserving recovery and member removal. Flutter tests cover approval controls, audience disclosure, scoped subscriptions, cache clearing, timestamps and shared-pin rendering. Physical-device and 24-hour battery acceptance remain separate requirements in `docs/PILOT.md`.
 
 See [the validation record](docs/VALIDATION.md) for completed checks and outstanding delivery requirements.
 

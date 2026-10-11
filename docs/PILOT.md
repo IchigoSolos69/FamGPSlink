@@ -8,6 +8,7 @@ Use one Android phone and one iPhone on the same configured family. Record OS ve
 
 - Fresh installation: name entry, private pairing code, no family access before approval, sharing off by default.
 - Approve both phones; enable foreground/precise permissions, then background/Always permission; both see each other's latest pin, timestamp and accuracy.
+- Approve an additional phone with **Private connection (only you)**. Verify only the owner sees its profile/pin and the private phone sees only the owner and its own pin. Check a normal family phone's map, list and count for absence of the private profile. Confirm the private phone's audience explanation and sharing toggle. Recover the private profile on a replacement phone and verify the audience remains restricted and the old phone loses access.
 - Close and reopen repeatedly: same profile, no duplicate setup. Reinstall a member phone and recover the existing profile through the owner; old installation loses all reads and writes.
 - Owner sign-in with the configured email/password; password recovery; a different email account cannot become owner.
 - Choose an owner manual pin: family sees only that pin, no manual label or invented accuracy. Keep it through restart. Inspect database: no underlying owner GPS records. Pause sharing: shared pin disappears; resume: chosen pin returns.

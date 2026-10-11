@@ -36,6 +36,7 @@ Each family member uses their own Apple Account for signing. That account is sep
 
 - **Your phone:** open FamGPSlink → **Family owner sign-in**, then sign in as `adimaitre56@gmail.com` using your chosen Firebase password.
 - **Other phones:** choose a profile name once and give you the pairing code. On your owner phone, open **Settings → Family administration** and approve the device. For an existing profile on a replacement phone, use its **Recover** action.
+- **Private connection:** for a new profile that should share only with you, enable **Private connection (only you)** in the approval dialog. That phone sees only you and its own pin; other family phones cannot see its profile or location. Recovery retains this choice.
 - On each phone, open FamGPSlink **Settings → Allow location**, allow **While Using the App**, then use **Background access**. If Always is not offered, use **Phone settings** and select **Location → Always**, with **Precise Location** enabled.
 - Enable **Share my location**. Confirm a new location appears on another family phone, then test with the iPhone locked. Complete [the physical-device pilot](PILOT.md) before relying on background updates.
 

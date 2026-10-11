@@ -3,16 +3,20 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'location_bridge.dart';
 import 'models.dart';
 
 class FamilyController extends ChangeNotifier {
-  FamilyController({FirebaseAuth? auth, FirebaseDatabase? database, LocationBridge? bridge})
-      : auth = auth ?? FirebaseAuth.instance,
-        database = database ?? FirebaseDatabase.instance,
-        bridge = bridge ?? LocationBridge();
+  FamilyController({
+    FirebaseAuth? auth,
+    FirebaseDatabase? database,
+    LocationBridge? bridge,
+  }) : auth = auth ?? FirebaseAuth.instance,
+       database = database ?? FirebaseDatabase.instance,
+       bridge = bridge ?? LocationBridge();
 
   final FirebaseAuth auth;
   final FirebaseDatabase database;
@@ -34,16 +38,18 @@ class FamilyController extends ChangeNotifier {
   String? error;
   bool _mapVisible = false;
   int _generation = 0;
+  int _bindingGeneration = 0;
+  bool _disposed = false;
 
   bool get isOwner => auth.currentUser?.uid == ownerUid && ownerUid != null;
   DatabaseReference get _family => database.ref('family');
   DatabaseReference get _state => _family.child('states/${self!.id}');
 
   Future<void> initialize() async {
-    // Disable disk persistence: native uploaders maintain a single encrypted
-    // pending fix, rather than an SDK queue of old location writes.
-    await database.setPersistenceEnabled(false);
-    installationId = await _storage.read(key: 'installationId') ?? randomCode(32);
+    // Native Firebase defaults to disk persistence disabled. Do not reconfigure
+    // it here: iOS may already have resumed tracking before Dart starts.
+    installationId =
+        await _storage.read(key: 'installationId') ?? randomCode(32);
     await _storage.write(key: 'installationId', value: installationId);
     _authSubscription = auth.authStateChanges().listen((user) {
       unawaited(_loadSession(user));
@@ -52,26 +58,48 @@ class FamilyController extends ChangeNotifier {
   }
 
   void _failure(Object exception) {
-    error = exception is FirebaseException && exception.code == 'permission-denied'
+    if (_disposed) return;
+    final revoked =
+        exception is FirebaseException && exception.code == 'permission-denied';
+    if (revoked) {
+      self = null;
+      members = [];
+      locations.clear();
+      control = const TrackingControl();
+      unawaited(_detachMap());
+      unawaited(bridge.stop());
+    }
+    error = revoked
         ? 'Access has changed. Your device may need approval again.'
+        : exception is PlatformException
+        ? exception.message ?? 'Check location permissions and reopen the app.'
         : 'The service is unavailable. Check your connection and try again.';
     notifyListeners();
   }
 
   Future<void> _loadSession(User? user) async {
     final generation = ++_generation;
+    _bindingGeneration++;
     loading = true;
     self = null;
     request = null;
     control = const TrackingControl();
     members = [];
     locations.clear();
-    for (final subscription in _sessionSubscriptions) {
+    connected = false;
+    final previousSubscriptions = List<StreamSubscription<dynamic>>.of(
+      _sessionSubscriptions,
+    );
+    _sessionSubscriptions.clear();
+    _selfSubscription = null;
+    _controlSubscription = null;
+    for (final subscription in previousSubscriptions) {
       await subscription.cancel();
     }
-    _sessionSubscriptions.clear();
     await _detachMap();
-    await bridge.stop();
+    if (user == null) await bridge.stop();
+    if (generation != _generation || _disposed) return;
+    if (user == null) loading = false;
     notifyListeners();
     if (user == null) return;
     try {
@@ -82,17 +110,27 @@ class FamilyController extends ChangeNotifier {
       if (ownerUid == null || ownerMemberId == null) {
         throw StateError('Owner has not been configured');
       }
-      _sessionSubscriptions.add(database.ref('.info/connected').onValue.listen((event) {
-        connected = event.snapshot.value == true;
-        notifyListeners();
-      }));
-      _sessionSubscriptions.add(database.ref('pairingRequests/${user.uid}').onValue.listen((event) {
-        request = event.snapshot.exists ? PairingRequest(user.uid, event.snapshot.value) : null;
-        notifyListeners();
-      }, onError: _failure));
-      _sessionSubscriptions.add(_family.child('bindings/${user.uid}').onValue.listen((event) {
-        unawaited(_bindingChanged(event.snapshot.value as String?, generation));
-      }, onError: _failure));
+      _sessionSubscriptions.add(
+        database.ref('.info/connected').onValue.listen((event) {
+          connected = event.snapshot.value == true;
+          notifyListeners();
+        }),
+      );
+      _sessionSubscriptions.add(
+        database.ref('pairingRequests/${user.uid}').onValue.listen((event) {
+          request = event.snapshot.exists
+              ? PairingRequest(user.uid, event.snapshot.value)
+              : null;
+          notifyListeners();
+        }, onError: _failure),
+      );
+      _sessionSubscriptions.add(
+        _family.child('bindings/${user.uid}').onValue.listen((event) {
+          unawaited(
+            _bindingChanged(event.snapshot.value as String?, generation),
+          );
+        }, onError: _failure),
+      );
       loading = false;
       error = null;
       notifyListeners();
@@ -108,17 +146,29 @@ class FamilyController extends ChangeNotifier {
   StreamSubscription<DatabaseEvent>? _controlSubscription;
   Future<void> _bindingChanged(String? id, int generation) async {
     if (generation != _generation) return;
+    final bindingGeneration = ++_bindingGeneration;
     await _selfSubscription?.cancel();
     await _controlSubscription?.cancel();
     await _detachMap();
+    if (generation != _generation ||
+        bindingGeneration != _bindingGeneration ||
+        _disposed) {
+      return;
+    }
     self = null;
-    await bridge.stop();
     if (id == null) {
+      members = [];
+      locations.clear();
+      control = const TrackingControl();
+      await bridge.stop();
       notifyListeners();
       return;
     }
     _selfSubscription = _family.child('members/$id').onValue.listen((event) {
-      if (generation != _generation) return;
+      if (generation != _generation ||
+          bindingGeneration != _bindingGeneration) {
+        return;
+      }
       final data = objectMap(event.snapshot.value);
       if (data['active'] != true || data['authUid'] != auth.currentUser?.uid) {
         self = null;
@@ -129,16 +179,22 @@ class FamilyController extends ChangeNotifier {
       _syncMap();
       notifyListeners();
     }, onError: _failure);
-    _controlSubscription = _stateFor(id).child('control').onValue.listen((event) {
-      if (generation != _generation) return;
-      control = TrackingControl.fromMap(event.snapshot.value);
-      if (control.sharing && !control.override) {
-        unawaited(bridge.start(id).catchError(_failure));
-      } else {
-        unawaited(bridge.stop());
-      }
-      notifyListeners();
-    }, onError: _failure);
+    _controlSubscription = _stateFor(id)
+        .child('control')
+        .onValue
+        .listen((event) {
+          if (generation != _generation ||
+              bindingGeneration != _bindingGeneration) {
+            return;
+          }
+          control = TrackingControl.fromMap(event.snapshot.value);
+          if (control.sharing && !control.override) {
+            unawaited(bridge.start(id).catchError(_failure));
+          } else {
+            unawaited(bridge.stop());
+          }
+          notifyListeners();
+        }, onError: _failure);
     _sessionSubscriptions.addAll([_selfSubscription!, _controlSubscription!]);
   }
 
@@ -146,7 +202,12 @@ class FamilyController extends ChangeNotifier {
 
   Future<void> createRequest(String name) async {
     final trimmed = name.trim();
-    if (trimmed.isEmpty || trimmed.length > 40) throw StateError('Use a name of 1–40 characters.');
+    if (trimmed.isEmpty || trimmed.length > 40) {
+      throw StateError('Use a name of 1–40 characters.');
+    }
+    if (auth.currentUser == null) {
+      await auth.signInAnonymously();
+    }
     await database.ref('pairingRequests/${auth.currentUser!.uid}').set({
       'name': trimmed,
       'installationId': installationId,
@@ -156,16 +217,30 @@ class FamilyController extends ChangeNotifier {
   }
 
   Future<void> signInOwner(String email, String password) async {
-    final credential = await auth.signInWithEmailAndPassword(email: email.trim(), password: password);
-    if (credential.user?.uid != ownerUid) {
+    final credential = await auth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+    // A fresh phone may not have loaded config before owner sign-in.
+    final configuredOwner = objectMap(
+      (await database.ref('config').get()).value,
+    )['ownerUid'];
+    if (configuredOwner == null || credential.user?.uid != configuredOwner) {
       await auth.signOut();
       await auth.signInAnonymously();
       throw StateError('This account is not the configured family owner.');
     }
   }
 
-  Future<void> resetOwnerPassword(String email) => auth.sendPasswordResetEmail(email: email.trim());
-  Future<void> retry() => _loadSession(auth.currentUser);
+  Future<void> resetOwnerPassword(String email) =>
+      auth.sendPasswordResetEmail(email: email.trim());
+  Future<void> retry() async {
+    if (auth.currentUser == null) {
+      await auth.signInAnonymously();
+    } else {
+      await _loadSession(auth.currentUser);
+    }
+  }
 
   void setMapVisible(bool visible) {
     _mapVisible = visible;
@@ -178,14 +253,18 @@ class FamilyController extends ChangeNotifier {
       return;
     }
     if (_mapSubscriptions.isNotEmpty) return;
-    _mapSubscriptions.add(_family.child('members').onValue.listen((event) {
-      members = objectMap(event.snapshot.value).entries
-          .where((entry) => objectMap(entry.value)['active'] == true)
-          .map((entry) => Member.fromMap(entry.key, entry.value)).toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
-      _refreshLocationSubscriptions();
-      notifyListeners();
-    }, onError: _failure));
+    _mapSubscriptions.add(
+      _family.child('members').onValue.listen((event) {
+        members =
+            objectMap(event.snapshot.value).entries
+                .where((entry) => objectMap(entry.value)['active'] == true)
+                .map((entry) => Member.fromMap(entry.key, entry.value))
+                .toList()
+              ..sort((a, b) => a.name.compareTo(b.name));
+        _refreshLocationSubscriptions();
+        notifyListeners();
+      }, onError: _failure),
+    );
   }
 
   final _locationSubscriptions = <String, StreamSubscription<DatabaseEvent>>{};
@@ -198,23 +277,31 @@ class FamilyController extends ChangeNotifier {
       }
     }
     for (final member in members) {
-      _locationSubscriptions.putIfAbsent(member.id, () => _stateFor(member.id).child('location').onValue.listen((event) {
-        if (event.snapshot.exists) {
-          try {
-            locations[member.id] = SharedLocation.fromMap(event.snapshot.value);
-          } catch (_) {
+      _locationSubscriptions.putIfAbsent(
+        member.id,
+        () => _stateFor(member.id).child('location').onValue.listen((event) {
+          if (event.snapshot.exists) {
+            try {
+              locations[member.id] = SharedLocation.fromMap(
+                event.snapshot.value,
+              );
+            } catch (_) {
+              locations.remove(member.id);
+            }
+          } else {
             locations.remove(member.id);
           }
-        } else {
-          locations.remove(member.id);
-        }
-        notifyListeners();
-      }, onError: _failure));
+          notifyListeners();
+        }, onError: _failure),
+      );
     }
   }
 
   Future<void> _detachMap() async {
-    final subscriptions = [..._mapSubscriptions, ..._locationSubscriptions.values];
+    final subscriptions = [
+      ..._mapSubscriptions,
+      ..._locationSubscriptions.values,
+    ];
     _mapSubscriptions.clear();
     _locationSubscriptions.clear();
     for (final subscription in subscriptions) {
@@ -223,11 +310,16 @@ class FamilyController extends ChangeNotifier {
   }
 
   Future<void> _requireConnection() async {
-    if (!connected) throw StateError('Reconnect before changing sharing or location settings.');
+    if (!connected) {
+      throw StateError(
+        'Reconnect before changing sharing or location settings.',
+      );
+    }
   }
 
   Future<void> setSharing(bool enabled) async {
     await _requireConnection();
+    await _state.get();
     final result = await _state.runTransaction((value) {
       final state = objectMap(value);
       if (state.isEmpty) return Transaction.abort();
@@ -235,81 +327,147 @@ class FamilyController extends ChangeNotifier {
       control['sharingEnabled'] = enabled;
       control['revision'] = (control['revision'] as num).toInt() + 1;
       if (!enabled) state.remove('location');
+      if (enabled && control['overrideActive'] == true) {
+        final manual = objectMap(control['manual']);
+        if (manual.isEmpty) return Transaction.abort();
+        state['location'] = {
+          'latitude': manual['latitude'],
+          'longitude': manual['longitude'],
+          'measuredAt': manual['setAt'],
+          'publishedAt': ServerValue.timestamp,
+        };
+      }
       state['control'] = control;
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) throw StateError('Sharing could not be updated. Try again.');
+    if (!result.committed) {
+      throw StateError('Sharing could not be updated. Try again.');
+    }
     if (enabled && !control.override) await bridge.start(self!.id);
     if (!enabled) await bridge.stop();
   }
 
   Future<void> setManual(double latitude, double longitude) async {
     if (!isOwner) throw StateError('Owner access required.');
-    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    if (latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180) {
       throw StateError('Choose a valid point on the map.');
     }
     await _requireConnection();
+    await _state.get();
     final result = await _state.runTransaction((value) {
       final state = objectMap(value);
       if (state.isEmpty) return Transaction.abort();
       final control = objectMap(state['control']);
       control['overrideActive'] = true;
+      control['manual'] = {
+        'latitude': latitude,
+        'longitude': longitude,
+        'setAt': ServerValue.timestamp,
+      };
       control['sharingEnabled'] = true;
       control['revision'] = (control['revision'] as num).toInt() + 1;
       state['control'] = control;
       state['location'] = {
-        'latitude': latitude, 'longitude': longitude,
-        'measuredAt': ServerValue.timestamp, 'publishedAt': ServerValue.timestamp,
+        'latitude': latitude,
+        'longitude': longitude,
+        'measuredAt': ServerValue.timestamp,
+        'publishedAt': ServerValue.timestamp,
       };
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) throw StateError('Location was not saved. Try again.');
+    if (!result.committed) {
+      throw StateError('Location was not saved. Try again.');
+    }
     await bridge.stop();
   }
 
   Future<void> clearManual() async {
     if (!isOwner) throw StateError('Owner access required.');
     await _requireConnection();
+    await _state.get();
     final expectedRevision = control.revision;
     final fix = await bridge.freshFix();
     await _requireConnection();
     final result = await _state.runTransaction((value) {
       final state = objectMap(value);
       final control = objectMap(state['control']);
-      if (control['revision'] != expectedRevision || control['overrideActive'] != true) {
+      if (control['revision'] != expectedRevision ||
+          control['overrideActive'] != true) {
         return Transaction.abort();
       }
-      if (DateTime.now().millisecondsSinceEpoch - (fix['measuredAt'] as num) > 60000) {
+      if (DateTime.now().millisecondsSinceEpoch - (fix['measuredAt'] as num) >
+          60000) {
         return Transaction.abort();
       }
       control['overrideActive'] = false;
+      control.remove('manual');
       control['sharingEnabled'] = true;
       control['revision'] = expectedRevision + 1;
       state['control'] = control;
       state['location'] = {...fix, 'publishedAt': ServerValue.timestamp};
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) throw StateError('A fresh GPS fix could not be saved. Your manual pin is still active.');
+    if (!result.committed) {
+      throw StateError(
+        'A fresh GPS fix could not be saved. Your manual pin is still active.',
+      );
+    }
     await bridge.start(self!.id);
   }
 
-  Stream<List<PairingRequest>> pairingRequests() => database.ref('pairingRequests').onValue.map((event) =>
-      objectMap(event.snapshot.value).entries.map((entry) => PairingRequest(entry.key, entry.value)).toList());
+  Stream<List<PairingRequest>> pairingRequests() => database
+      .ref('pairingRequests')
+      .onValue
+      .map(
+        (event) =>
+            objectMap(event.snapshot.value).entries
+                .map((entry) => PairingRequest(entry.key, entry.value))
+                .toList(),
+      );
 
-  Stream<List<Member>> familyMembers() => _family.child('members').onValue.map((event) =>
-      objectMap(event.snapshot.value).entries.map((entry) => Member.fromMap(entry.key, entry.value)).toList());
+  Stream<List<Member>> familyMembers() => _family
+      .child('members')
+      .onValue
+      .map(
+        (event) =>
+            objectMap(event.snapshot.value).entries
+                .map((entry) => Member.fromMap(entry.key, entry.value))
+                .toList(),
+      );
 
-  Future<void> approve(PairingRequest pairing, {String? recoverMemberId}) async {
+  Future<void> approve(
+    PairingRequest pairing, {
+    String? recoverMemberId,
+  }) async {
     await _requireConnection();
     if (!isOwner) throw StateError('Owner access required.');
-    final fresh = PairingRequest(pairing.uid, (await database.ref('pairingRequests/${pairing.uid}').get()).value);
-    if (fresh.code != pairing.code || fresh.installationId != pairing.installationId) {
+    final fresh = PairingRequest(
+      pairing.uid,
+      (await database.ref('pairingRequests/${pairing.uid}').get()).value,
+    );
+    if (fresh.code != pairing.code ||
+        fresh.installationId != pairing.installationId) {
       throw StateError('Pairing request changed. Ask for the current code.');
     }
     final memberId = recoverMemberId ?? randomCode(20);
-    if (memberId == ownerMemberId) throw StateError('Recover the owner using email sign-in.');
-    final previous = objectMap((await _family.child('members/$memberId').get()).value);
-    if (recoverMemberId != null && previous.isEmpty) throw StateError('Profile no longer exists.');
+    if (recoverMemberId == null &&
+        objectMap((await _family.child('members').get()).value).length >= 10) {
+      throw StateError(
+        'The pilot supports ten profiles. Remove a profile or recover an existing one.',
+      );
+    }
+    if (memberId == ownerMemberId) {
+      throw StateError('Recover the owner using email sign-in.');
+    }
+    final previous = objectMap(
+      (await _family.child('members/$memberId').get()).value,
+    );
+    if (recoverMemberId != null && previous.isEmpty) {
+      throw StateError('Profile no longer exists.');
+    }
     final updates = <String, Object?>{
       'family/members/$memberId': {
         'name': previous['name'] ?? pairing.name,
@@ -319,20 +477,28 @@ class FamilyController extends ChangeNotifier {
       },
       'family/bindings/${pairing.uid}': memberId,
       'family/states/$memberId': {
-        'control': {'sharingEnabled': false, 'overrideActive': false,
-          'revision': DateTime.now().millisecondsSinceEpoch},
+        'control': {
+          'sharingEnabled': false,
+          'overrideActive': false,
+          'revision': DateTime.now().millisecondsSinceEpoch,
+        },
       },
       'pairingRequests/${pairing.uid}': null,
     };
-    if (previous['authUid'] != null) updates['family/bindings/${previous['authUid']}'] = null;
+    if (previous['authUid'] != null) {
+      updates['family/bindings/${previous['authUid']}'] = null;
+    }
     await database.ref().update(updates);
   }
 
-  Future<void> reject(PairingRequest pairing) => database.ref('pairingRequests/${pairing.uid}').remove();
+  Future<void> reject(PairingRequest pairing) =>
+      database.ref('pairingRequests/${pairing.uid}').remove();
 
   Future<void> removeMember(Member member) async {
     await _requireConnection();
-    if (!isOwner || member.id == ownerMemberId) throw StateError('Cannot remove the owner.');
+    if (!isOwner || member.id == ownerMemberId) {
+      throw StateError('Cannot remove the owner.');
+    }
     await database.ref().update({
       'family/bindings/${member.authUid}': null,
       'family/members/${member.id}': null,
@@ -342,6 +508,7 @@ class FamilyController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _generation++;
     unawaited(_authSubscription?.cancel());
     for (final subscription in _sessionSubscriptions) {

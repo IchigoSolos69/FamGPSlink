@@ -7,8 +7,10 @@ Map<String, dynamic> objectMap(Object? value) => value is Map
 String randomCode([int length = 16]) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   final random = Random.secure();
-  return List.generate(length, (_) => alphabet[random.nextInt(alphabet.length)])
-      .join();
+  return List.generate(
+    length,
+    (_) => alphabet[random.nextInt(alphabet.length)],
+  ).join();
 }
 
 class Member {
@@ -19,8 +21,11 @@ class Member {
 
   factory Member.fromMap(String id, Object? value) {
     final map = objectMap(value);
-    return Member(id, map['name'] as String? ?? 'Family member',
-        map['authUid'] as String? ?? '');
+    return Member(
+      id,
+      map['name'] as String? ?? 'Family member',
+      map['authUid'] as String? ?? '',
+    );
   }
 }
 
@@ -50,7 +55,8 @@ class SharedLocation {
   }
 
   bool isStale(DateTime now) =>
-      now.millisecondsSinceEpoch - measuredAt > const Duration(minutes: 15).inMilliseconds;
+      now.millisecondsSinceEpoch - measuredAt >
+      const Duration(minutes: 15).inMilliseconds;
 
   String ageLabel(DateTime now) {
     final seconds = max(0, (now.millisecondsSinceEpoch - measuredAt) ~/ 1000);
@@ -62,7 +68,11 @@ class SharedLocation {
 }
 
 class TrackingControl {
-  const TrackingControl({this.sharing = false, this.override = false, this.revision = 0});
+  const TrackingControl({
+    this.sharing = false,
+    this.override = false,
+    this.revision = 0,
+  });
   final bool sharing;
   final bool override;
   final int revision;

@@ -11,6 +11,8 @@ include: package:flutter_lints/flutter.yaml
 
 analyzer:
   exclude:
+    - .tooling/**
+    - node_modules/**
     - build/**
     - android/**
     - ios/**

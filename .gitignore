@@ -9,6 +9,7 @@ database-debug.log
 ui-debug.log
 *.log
 android/local.properties
+android/.kotlin/
 android/key.properties
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
@@ -23,3 +24,7 @@ ios/Flutter/ephemeral/
 *.mobileprovision
 service-account*.json
 .DS_Store
+.idea/
+*.iml
+coverage/
+ios/Flutter/GeneratedPluginSwiftPackage/

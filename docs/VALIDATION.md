@@ -13,12 +13,14 @@ Version 1.1.1 fixes a reproducible save failure after approval. The user's scree
 | Android native/Flutter debug APK | Built successfully with final source |
 | GitHub workflow YAML | All three workflows parsed successfully, including the free-account sideload build |
 | Real Firebase backend | Owner binding/control state verified; deployed rules match source; anonymous sign-in works; unapproved family/private-control reads denied |
-| iOS native release compile / packaging | Version 1.1.0 build 1003 succeeded in run 38153997532, with Firebase config included; AltStore update installation still needs verification |
+| iOS native release compile / packaging | Version 1.1.0 build 1003 succeeded in run 38153997532. The 1.1.1 configured build 38156375135 was intentionally cancelled by the user during compilation; no updated IPA was produced |
 | Physical background tracking and 24-hour pilots | Not run; requires phones and a configured family backend |
 
-APK: `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`, 194,243,551 bytes (configured debug build, version code 4). The same APK is also available as `app-debug.apk`.
+The user also reported hour-old pins on Android phones that had stayed stationary. Inspection found that the five-minute balanced-power request retained a 50-metre minimum distance, preventing callbacks without movement. Version 1.1.1 uses zero minimum distance in stationary mode and retains the 50-metre filter in moving mode. It publishes only actual fixes with their measurement time; timestamps are not fabricated to make a stale pin appear fresh. Android scheduling, low-power restrictions and the actual stationary update cadence still need physical-device validation. See [Google Play services LocationRequest.Builder](https://developers.google.com/android/reference/com/google/android/gms/location/LocationRequest.Builder) for the minimum-distance behavior.
 
-SHA-256: `c9ecded27fc3249d9e372e2476f0324b2a2ec09026f0beeb3dd077c6373d47da`.
+APK: `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`, 194,261,619 bytes (configured debug build, version code 4). Both sharing and stationary fixes are included. The same APK is also available as `app-debug.apk`. Android package/version were verified with `aapt`.
+
+SHA-256: `4ad8ed1ccb0dbcd3d49126fe01976c18dc3872d33fa452cced2fea0aa9f06cf0`.
 
 Version 1.1.0 adds private connections selected during owner approval. Normal members receive only the `visibility: family` roster query; private connections read only their own and the owner's profiles. The rules apply the same audience checks to direct location/profile reads, deny private-to-family and family-to-private reads even with known paths, and retain private visibility after device recovery. Sharing remains opt-in. The owner sees both groups; separate private connections cannot see each other. The approval dialog lifecycle was also corrected after the new widget test exposed a controller being disposed during its closing animation.
 

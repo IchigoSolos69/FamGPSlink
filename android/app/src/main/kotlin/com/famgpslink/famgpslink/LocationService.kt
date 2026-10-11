@@ -122,8 +122,11 @@ class LocationService : Service() {
         if (destroyed || !sharing || overridden) return
         client.removeLocationUpdates(callback)
         val interval = if (moving) 60000L else 300000L
+        // A distance requirement blocks time-based updates on a stationary
+        // phone. Keep it while moving; idle fixes still carry real timestamps.
+        val minimumDistance = if (moving) 50f else 0f
         val request = LocationRequest.Builder(if (moving) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY, interval)
-            .setMinUpdateIntervalMillis(interval).setMinUpdateDistanceMeters(50f).setMaxUpdateDelayMillis(interval).build()
+            .setMinUpdateIntervalMillis(interval).setMinUpdateDistanceMeters(minimumDistance).setMaxUpdateDelayMillis(interval).build()
         try {
             client.requestLocationUpdates(request, callback, Looper.getMainLooper()).addOnFailureListener { halt("Location permission or GPS is unavailable.") }
             if (lastMotion == 0L) { lastMotion = System.currentTimeMillis(); handler.postDelayed(idle, 180000) }

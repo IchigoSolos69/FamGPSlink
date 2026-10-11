@@ -23,7 +23,7 @@ The local Flutter SDK is under `.tooling/flutter`; JDK is under `.tooling/java`.
 
 Debug APK: `build/app/outputs/flutter-apk/app-debug.apk`. With a connected phone, use `flutter run`, or `adb install -r` on the APK. Use the same test signing key for upgrades during the pilot; do not treat the debug-signed APK as a store release.
 
-The latest local pilot is **1.1.1 (build 4)**, saved as `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`. Install over the existing app to keep the remembered profile. This update fixes sharing-save failures after approval and repeated enable attempts. Version 1.1.0 added private connections. **Upgrade every family phone:** the new rules require a constrained roster query; older versions may report changed access until upgraded. Startup failures still show a retry button and a safe error code rather than incorrectly claiming the build has no family configuration.
+The latest local pilot is **1.1.1 (build 4)**, saved as `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`. Install over the existing app to keep the remembered profile. This update fixes sharing-save failures after approval, repeated enable attempts and Android stationary updates blocked by the movement filter. Version 1.1.0 added private connections. **Upgrade every family phone:** the new rules require a constrained roster query; older versions may report changed access until upgraded. Startup failures still show a retry button and a safe error code rather than incorrectly claiming the build has no family configuration.
 
 ## Connect your family
 

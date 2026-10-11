@@ -92,7 +92,7 @@ See [the validation record](docs/VALIDATION.md) for completed checks and outstan
 
 ## Cloud builds and TestFlight
 
-For iPhone installation **without paid Apple membership**, use the [Windows/AltStore installation guide](docs/IOS_SIDELOAD.md) and the manual **iPhone sideload build** workflow. It packages a configured unsigned release IPA for AltStore to sign on each device. Free installs require refreshing every seven days. The first cloud iOS build and physical tracking pilot remain unverified; no iPhone download exists yet. The TestFlight route below is optional and requires paid membership.
+For iPhone installation **without paid Apple membership**, use the [Windows/AltStore installation guide](docs/IOS_SIDELOAD.md) and the manual **iPhone sideload build** workflow. It packages a configured unsigned release IPA for AltStore to sign on each device. Free installs require refreshing every seven days. The initial 1.0.1 cloud build succeeded and installed through AltStore; current rules require building the 1.1.0 source on **codex/fix-iphone-approval** until merged. Check the downloaded artifact's `BUILD_INFO.json` before installation. The updated iPhone build and physical tracking pilot remain unverified. The TestFlight route below is optional and requires paid membership.
 
 Push this source to your own GitHub repository to use `.github/workflows/checks.yml`. Checks run Flutter analysis/tests, rules tests, an unconfigured Android APK build and an unsigned native iOS compile.
 

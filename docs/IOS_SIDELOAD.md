@@ -2,7 +2,7 @@
 
 Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple Account. AltStore signs the app for your phone. Free installs expire after seven days and must be refreshed; they are limited to three active sideloaded apps per device. This is a pilot route, with no paid Apple membership required. See [AltStore's free distribution documentation](https://faq.altstore.io/developers/distribute-with-altstore-classic) and [expiration limits](https://faq.altstore.io/altstore-classic/your-altstore).
 
-**Current status:** the workflow is prepared locally. No iPhone IPA has been built or installed yet. Windows cannot compile the native iPhone app; GitHub's Mac runner must build it first. First-build failures and physical background tracking still need validation. Check your GitHub Actions allowance and spending limit before running a Mac job; free Apple signing does not make cloud compute unlimited.
+**Current status:** version 1.0.1 built successfully in GitHub and was installed through AltStore. Use version 1.1.0 or later for the current privacy rules; the updated source is on **codex/fix-iphone-approval**. Windows cannot compile the native iPhone app; GitHub's Mac runner builds it. Installing the updated version and physical background tracking still need validation. Check your GitHub Actions allowance and spending limit before running a Mac job; free Apple signing does not make cloud compute unlimited.
 
 ## 1. Generate the FamGPSlink IPA once
 
@@ -17,7 +17,7 @@ Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple 
 
    This is the native client configuration, not an owner password or service-account credential. No Apple signing secrets are needed for this workflow.
 4. Open GitHub **Actions → iPhone sideload build → Run workflow**, choose the branch containing the source, and run it. Use this workflow rather than the paid-signing **Family pilot builds** workflow.
-5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
+5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. Check **BUILD_INFO.json** for version **1.1.0** or later and the intended source commit. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
 6. Transfer the IPA to the iPhone's Files app, for example through your own iCloud Drive. Keep it within your family.
 
 ## 2. Install AltStore Classic on each iPhone
@@ -47,3 +47,9 @@ At least once every seven days, run AltServer on Windows, connect the iPhone by 
 Expired apps cannot be opened. If AltStore itself expires, reinstall it through AltServer without deleting it first, then refresh FamGPSlink. Avoid deleting FamGPSlink to resolve signing problems: a fresh installation may require owner-approved profile recovery. Changes to the Apple signing account can also affect secure stored identity.
 
 If you have a Mac, Apple's alternative is Xcode with a free **Personal Team**; it also requires periodic rebuilding/reinstallation under the same seven-day limit. [Apple's Personal Team documentation](https://developer.apple.com/help/account/basics/about-your-developer-account).
+
+## Access error immediately after approval
+
+Version 1.0.1 requests the complete member roster after approval. The privacy rules introduced with 1.1.0 reject that unrestricted read for regular members, and the old app incorrectly reports it as lost device approval. Repeating approval does not fix an old binary.
+
+The reported run `38151212570` compiled commit `750919b52bcd53111c5259ed88885ff3c68f614a`, which is version 1.0.1. Build the corrected source from branch **codex/fix-iphone-approval** using **Actions → iPhone sideload build → Run workflow → Use workflow from**, then select that branch. Download the new artifact, check `BUILD_INFO.json`, and install the IPA through AltStore using the same signing Apple Account, over the existing FamGPSlink installation. Keep the app installed while updating so its remembered approval can be restored. Open FamGPSlink and use **Retry connection** if the earlier error remains on screen.

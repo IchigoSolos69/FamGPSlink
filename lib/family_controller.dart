@@ -396,11 +396,18 @@ class FamilyController extends ChangeNotifier {
 
   Future<void> setSharing(bool enabled) async {
     await _requireConnection();
-    await _state.get();
-    final result = await _state.runTransaction((value) {
+    final reference = _state;
+    await _requireTrackingState(reference);
+    final result = await reference.runTransaction((value) {
+      // iOS/Android may have no complete cached state even after get(). Let
+      // Firebase fetch the current server state and rerun this transaction.
+      if (value == null) return Transaction.success(null);
       final state = objectMap(value);
       if (state.isEmpty) return Transaction.abort();
       final control = objectMap(state['control']);
+      // A repeated request must not republish an old GPS fix or invalidate
+      // queued uploads by changing the control revision unnecessarily.
+      if (control['sharingEnabled'] == enabled) return Transaction.abort();
       control['sharingEnabled'] = enabled;
       control['revision'] = (control['revision'] as num).toInt() + 1;
       if (!enabled) state.remove('location');
@@ -417,11 +424,25 @@ class FamilyController extends ChangeNotifier {
       state['control'] = control;
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) {
+    final saved = objectMap(result.snapshot.value);
+    final savedControl = objectMap(saved['control']);
+    if (savedControl['sharingEnabled'] != enabled) {
       throw StateError('Sharing could not be updated. Try again.');
     }
-    if (enabled && !control.override) await bridge.start(self!.id);
-    if (!enabled) await bridge.stop();
+    if (enabled && savedControl['overrideActive'] == false) {
+      await bridge.start(self!.id);
+    } else {
+      await bridge.stop();
+    }
+  }
+
+  Future<void> _requireTrackingState(DatabaseReference reference) async {
+    final snapshot = await reference.get();
+    if (!objectMap(snapshot.value).containsKey('control')) {
+      throw StateError(
+        'Your device has no tracking settings. Retry the connection or ask the owner to approve it again.',
+      );
+    }
   }
 
   Future<void> setManual(double latitude, double longitude) async {
@@ -433,8 +454,10 @@ class FamilyController extends ChangeNotifier {
       throw StateError('Choose a valid point on the map.');
     }
     await _requireConnection();
-    await _state.get();
-    final result = await _state.runTransaction((value) {
+    final reference = _state;
+    await _requireTrackingState(reference);
+    final result = await reference.runTransaction((value) {
+      if (value == null) return Transaction.success(null);
       final state = objectMap(value);
       if (state.isEmpty) return Transaction.abort();
       final control = objectMap(state['control']);
@@ -455,7 +478,11 @@ class FamilyController extends ChangeNotifier {
       };
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) {
+    if (!result.committed ||
+        objectMap(
+              objectMap(result.snapshot.value)['control'],
+            )['overrideActive'] !=
+            true) {
       throw StateError('Location was not saved. Try again.');
     }
     await bridge.stop();
@@ -464,11 +491,13 @@ class FamilyController extends ChangeNotifier {
   Future<void> clearManual() async {
     if (!isOwner) throw StateError('Owner access required.');
     await _requireConnection();
-    await _state.get();
+    final reference = _state;
+    await _requireTrackingState(reference);
     final expectedRevision = control.revision;
     final fix = await bridge.freshFix();
     await _requireConnection();
-    final result = await _state.runTransaction((value) {
+    final result = await reference.runTransaction((value) {
+      if (value == null) return Transaction.success(null);
       final state = objectMap(value);
       final control = objectMap(state['control']);
       if (control['revision'] != expectedRevision ||
@@ -487,7 +516,11 @@ class FamilyController extends ChangeNotifier {
       state['location'] = {...fix, 'publishedAt': ServerValue.timestamp};
       return Transaction.success(state);
     }, applyLocally: false);
-    if (!result.committed) {
+    if (!result.committed ||
+        objectMap(
+              objectMap(result.snapshot.value)['control'],
+            )['overrideActive'] !=
+            false) {
       throw StateError(
         'A fresh GPS fix could not be saved. Your manual pin is still active.',
       );

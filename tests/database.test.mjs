@@ -129,6 +129,40 @@ test('pausing removes the pin and publishing while paused is rejected', async ()
   await assertFails(set(ref(db('alice-uid'), 'family/states/alice'), { control: control(2, false, false), location: fix() }));
   await assertFails(set(ref(db('alice-uid'), 'family/states/alice'), { control: control(1), location: fix() }));
 });
+
+test('newly approved device enables sharing from an empty transaction cache', async () => {
+  await environment.withSecurityRulesDisabled(async (context) =>
+    set(ref(context.database(), 'family/states/alice'), { control: control(12345, false, false) }));
+  const reference = ref(db('alice-uid'), 'family/states/alice');
+  let retriedEmptyCache = false;
+  const result = await assertSucceeds(runTransaction(reference, (state) => {
+    if (state === null) { retriedEmptyCache = true; return null; }
+    state.control.sharingEnabled = true;
+    state.control.revision += 1;
+    return state;
+  }, { applyLocally: false }));
+  assert.equal(retriedEmptyCache, true);
+  assert.equal(result.committed, true);
+  assert.equal(result.snapshot.val().control.sharingEnabled, true);
+  assert.equal(result.snapshot.val().control.revision, 12346);
+  assert.equal(result.snapshot.hasChild('location'), false);
+  await assertSucceeds(set(reference, { control: control(12346), location: fix() }));
+});
+
+test('repeated sharing enable leaves the existing publication and revision intact', async () => {
+  const reference = ref(db('alice-uid'), 'family/states/alice');
+  const result = await assertSucceeds(runTransaction(reference, (state) => {
+    if (state === null) return null;
+    if (state.control.sharingEnabled === true) return undefined;
+    state.control.sharingEnabled = true;
+    state.control.revision += 1;
+    return state;
+  }, { applyLocally: false }));
+  assert.equal(result.committed, false);
+  assert.equal(result.snapshot.val().control.sharingEnabled, true);
+  assert.equal(result.snapshot.val().control.revision, 1);
+  assert.equal(typeof result.snapshot.val().location.publishedAt, 'number');
+});
 test('owner atomically approves a new phone and creates a stable profile', async () => {
   await set(ref(db('charlie-uid'), 'pairingRequests/charlie-uid'), request);
   await assertSucceeds(update(ref(db('owner-uid')), {

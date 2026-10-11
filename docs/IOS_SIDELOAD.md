@@ -2,7 +2,7 @@
 
 Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple Account. AltStore signs the app for your phone. Free installs expire after seven days and must be refreshed; they are limited to three active sideloaded apps per device. This is a pilot route, with no paid Apple membership required. See [AltStore's free distribution documentation](https://faq.altstore.io/developers/distribute-with-altstore-classic) and [expiration limits](https://faq.altstore.io/altstore-classic/your-altstore).
 
-**Current status:** the corrected version **1.1.0 (iPhone build 1003)** built successfully from `main` commit `823525b` in [run 38153997532](https://github.com/IchigoSolos69/FamGPSlink/actions/runs/38153997532). Download that run's artifact to update the older 1.0.1 installation. Windows cannot compile the native iPhone app; GitHub's Mac runner builds it. Installing the updated version and physical background tracking still need validation. Check your GitHub Actions allowance and spending limit before running a Mac job; free Apple signing does not make cloud compute unlimited.
+**Current status:** version **1.1.1** fixes a sharing-save failure after approval: transactions now retry when the native cache is initially empty, and repeated enable attempts preserve the existing pin. Version 1.1.0 build 1003 from [run 38153997532](https://github.com/IchigoSolos69/FamGPSlink/actions/runs/38153997532) contains the earlier approval/map fix but does not contain this sharing fix. Build the latest `codex/fix-iphone-approval` source using the workflow below. Windows cannot compile the native iPhone app; GitHub's Mac runner builds it. Physical background tracking still needs validation. Check your GitHub Actions allowance and spending limit before running a Mac job; free Apple signing does not make cloud compute unlimited.
 
 ## 1. Generate the FamGPSlink IPA once
 
@@ -17,7 +17,7 @@ Use **AltStore Classic**, its Windows companion **AltServer**, and a free Apple 
 
    This is the native client configuration, not an owner password or service-account credential. No Apple signing secrets are needed for this workflow.
 4. Open GitHub **Actions → iPhone sideload build → Run workflow**, choose the branch containing the source, and run it. Use this workflow rather than the paid-signing **Family pilot builds** workflow.
-5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. If **BUILD_INFO.json** is present, check for version **1.1.0** or later and the intended source commit. This manifest is added by the `codex/fix-iphone-approval` workflow update; run 38153997532 predates it and is verified to contain the corrected source. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
+5. After a successful run, open its summary and download **famgpslink-iphone-sideload** under **Artifacts**. Extract the downloaded ZIP. Check **BUILD_INFO.json** for version **1.1.1** or later and the intended source commit. Run 38153997532 predates this manifest and the sharing fix. The install file is **famgpslink-unsigned.ipa**; the outer artifact ZIP is not the app. A failed run produces no usable download: inspect the failed build step before proceeding.
 6. Transfer the IPA to the iPhone's Files app, for example through your own iCloud Drive. Keep it within your family.
 
 ## 2. Install AltStore Classic on each iPhone

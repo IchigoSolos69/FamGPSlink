@@ -2,21 +2,23 @@
 
 Local validation on 11 October 2026 (Windows):
 
+Version 1.1.1 fixes a reproducible save failure after approval. The user's screenshot shows all four permissions granted and the exact aborted-transaction message, "Sharing could not be updated. Try again." FlutterFire transactions can initially supply null even after a successful `get()`. The old sharing/manual handlers aborted immediately; the updated handlers let Firebase retry against current server data. Sharing requests that already match the server state now succeed without rewriting an old location or advancing its control revision. Collection uses the saved override state instead of a potentially stale controller value. Errors from Realtime Database now include a safe error code. Live read-only inspection verified three valid approved profiles and exact deployed rules; no approvals, controls or coordinates were changed during diagnosis. The six added Flutter regressions failed before the fix and passed afterward. Two emulator regressions validate cold-cache and repeated-enable behavior under the unchanged security rules. The updated iPhone binary still needs installation and physical validation.
+
 | Check | Result |
 | --- | --- |
 | Dart formatting | Passed; no remaining changes |
 | Flutter analyzer | Passed; no issues |
-| Flutter model/widget/subscription tests | All 14 passed, including the additional roster-error regression preserving valid approval and sharing state |
-| Realtime Database emulator security tests | 23 passed, including private profile/location isolation, constrained queries and private device recovery |
+| Flutter model/widget/subscription tests | All 20 passed, including cold-cache sharing, repeated enable, pause, manual restore and safe error messages |
+| Realtime Database emulator security tests | 25 passed, including native-style empty-cache sharing retries, idempotent enable, private audience isolation and recovery |
 | Android native/Flutter debug APK | Built successfully with final source |
 | GitHub workflow YAML | All three workflows parsed successfully, including the free-account sideload build |
 | Real Firebase backend | Owner binding/control state verified; deployed rules match source; anonymous sign-in works; unapproved family/private-control reads denied |
 | iOS native release compile / packaging | Version 1.1.0 build 1003 succeeded in run 38153997532, with Firebase config included; AltStore update installation still needs verification |
 | Physical background tracking and 24-hour pilots | Not run; requires phones and a configured family backend |
 
-APK: `build/app/outputs/flutter-apk/famgpslink-1.1.0.apk`, 194,242,371 bytes (configured debug build, version code 3). The same APK is also available as `app-debug.apk`.
+APK: `build/app/outputs/flutter-apk/famgpslink-1.1.1.apk`, 194,243,551 bytes (configured debug build, version code 4). The same APK is also available as `app-debug.apk`.
 
-SHA-256: `0054FA4C64D5CF9252E629FF34FEE8CD4C8E9758343862303865D387FE2F09A7`.
+SHA-256: `c9ecded27fc3249d9e372e2476f0324b2a2ec09026f0beeb3dd077c6373d47da`.
 
 Version 1.1.0 adds private connections selected during owner approval. Normal members receive only the `visibility: family` roster query; private connections read only their own and the owner's profiles. The rules apply the same audience checks to direct location/profile reads, deny private-to-family and family-to-private reads even with known paths, and retain private visibility after device recovery. Sharing remains opt-in. The owner sees both groups; separate private connections cannot see each other. The approval dialog lifecycle was also corrected after the new widget test exposed a controller being disposed during its closing animation.
 
